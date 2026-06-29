@@ -7,3 +7,6 @@ IDPaths.Rproj
 env/ 
 __pycache__/
 .DS_Store
+build/
+dist/
+*.egg-info/
