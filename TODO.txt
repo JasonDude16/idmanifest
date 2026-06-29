@@ -1,5 +1,11 @@
-keep_df arg -> keep_data
-add FUN are to check_assertions
-io module for loading/saving log, df, obj, etc.
-fix subset_by_name fun; didn't remove the file when last tested
-need to check whether check assertions dict is empty before running "run files"
+DONE: use clear read_all(..., keep_data=...) naming
+DONE: add custom validation functions
+DONE: add helpers for loading/saving manifest, log, and object state
+DONE: make remove_files accept basenames and full paths
+DONE: warn when reading files without registered validations
+DONE: move to src/idmanifest package layout
+DONE: add pyproject metadata and MIT license
+DONE: support full-match, first-capture, named-capture, and explicit-group ID extraction
+DONE: add CheckReport.details()
+DONE: add duplicate ID policies
+DONE: add tests for edge cases and deploy-readiness behavior

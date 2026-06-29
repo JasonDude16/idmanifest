@@ -1,0 +1,14 @@
+LICENSE
+README.md
+pyproject.toml
+src/idmanifest/__init__.py
+src/idmanifest/inventory.py
+src/idmanifest/manifest.py
+src/idmanifest/report.py
+src/idmanifest.egg-info/PKG-INFO
+src/idmanifest.egg-info/SOURCES.txt
+src/idmanifest.egg-info/dependency_links.txt
+src/idmanifest.egg-info/requires.txt
+src/idmanifest.egg-info/top_level.txt
+tests/test_inventory.py
+tests/test_manifest.py
