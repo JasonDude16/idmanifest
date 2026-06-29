@@ -1,36 +1,18 @@
-"""
-Interactive idmanifest walkthrough.
-
-This script is intentionally verbose. It is meant for IDE line-by-line use,
-not as a unit test. Run it from the project root:
-
-  /Volumes/Projects/personal/idmanifest
-
-Objects such as tmp, root, inventory, report, manifest, and copied_manifest
-are left in memory so you can inspect them after each section. The temporary
-workspace is not deleted unless you run tmp.cleanup() at the bottom.
-"""
-
 from pathlib import Path
 import sys
 import tempfile
-
 import pandas as pd
+from idmanifest import IDManifest, PathInventory
 
 sys.path.insert(0, str(Path.cwd() / "src"))
 
-from idmanifest import IDManifest, PathInventory
-
-
 def section(title):
   print(f"\n=== {title} ===")
-
 
 def show(title, value):
   print(f"\n{title}")
   print(value)
   return value
-
 
 def write_csv(path, values, group="A", include_note=False):
   df = pd.DataFrame({"value": values, "group": [group] * len(values)})
@@ -38,16 +20,13 @@ def write_csv(path, values, group="A", include_note=False):
     df["note"] = ["ok"] * len(values)
   df.to_csv(path, index=False)
 
-
 def read_csv_with_path(path):
   df = pd.read_csv(path)
   df.attrs["source_path"] = str(path)
   return df
 
-
 def has_positive_values(df):
   return (df["value"] > 0).all()
-
 
 def has_at_least_rows(df, minimum):
   return len(df) >= minimum
@@ -63,8 +42,6 @@ beta_dir = data_dir / "beta"
 gamma_dir = data_dir / "gamma"
 for directory in (alpha_dir, beta_dir, gamma_dir):
   directory.mkdir(parents=True)
-
-root
 
 
 # 2. Create sample files with intentional problems and edge cases.
@@ -88,7 +65,6 @@ paths = {
   "beta": str(beta_dir / "*.csv"),
   "gamma": str(gamma_dir / "*.csv")
 }
-
 show("Glob inputs", paths)
 
 
@@ -379,5 +355,4 @@ refresh_inventory.all_files()
 # 20. Cleanup when finished.
 section("Cleanup")
 root
-# Run this manually when you are finished exploring:
-# tmp.cleanup()
+tmp.cleanup()
