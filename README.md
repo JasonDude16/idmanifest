@@ -124,6 +124,43 @@ inventory.remove_failed_checks(report, checks=["invalid_ids", "duplicate_ids"])
 
 These methods return per-tag counts so scripts can log what changed.
 
+
+## Expected IDs
+
+Use expected IDs when a study should contain a known set of participants or sessions. This is optional and manifest-level: the regex extracts observed IDs, while `expected_ids` defines what should exist.
+
+```python
+manifest.missing_ids(["BASE101", "BASE102", "BASE103"])
+manifest.extra_ids(["BASE101", "BASE102", "BASE103"])
+```
+
+`ensure_ids()` works like a left join from the expected IDs onto the current manifest. Missing expected IDs are added as rows with missing paths.
+
+```python
+manifest.ensure_ids(["BASE101", "BASE102", "BASE103"])
+```
+
+For numeric ranges, use inclusive range helpers:
+
+```python
+manifest.missing_id_range(101, 260, prefix="BASE")
+manifest.ensure_id_range(101, 260, prefix="BASE")
+```
+
+Padded IDs are supported:
+
+```python
+manifest.ensure_id_range(1, 99, prefix="BASE", width=3)
+```
+
+By default, observed IDs outside the expected set are kept. You can choose how to handle extras:
+
+```python
+manifest.ensure_ids(expected_ids, extras="keep")   # default
+manifest.ensure_ids(expected_ids, extras="drop")
+manifest.ensure_ids(expected_ids, extras="raise")
+```
+
 ## Read And Validate Data
 
 ```python
@@ -160,13 +197,13 @@ Run a complete terminal example:
 python examples/basic_workflow.py
 ```
 
-For line-by-line IDE exploration, open and run:
+For a fuller line-by-line IDE walkthrough, open and run:
 
 ```bash
 examples/interactive_workflow.py
 ```
 
-Set your IDE working directory to the project root before running the interactive example.
+It demonstrates inventory inspection, report details, duplicate policies, keep/remove workflows, explicit file lists, ID extraction styles, manifest reading/validation, error logging, copying files, path replacement, CSV output, pickle output, and refresh behavior. Set your IDE working directory to the project root before running it.
 
 ## Persistence
 

@@ -78,6 +78,60 @@ class IDManifest:
       columns = list(self.columns())
     return self._df[columns].dropna(axis=0, how=how).copy()
 
+  def _normalize_ids(self, ids):
+    return [str(file_id) for file_id in ids]
+
+  def _id_range(self, start, stop, prefix="", suffix="", width=None):
+    if stop < start:
+      raise ValueError("`stop` must be greater than or equal to `start`")
+    return [
+      f"{prefix}{str(value).zfill(width) if width is not None else value}{suffix}"
+      for value in range(start, stop + 1)
+    ]
+
+  def missing_ids(self, expected_ids):
+    expected = self._normalize_ids(expected_ids)
+    observed = set(self.ids().astype(str))
+    return [file_id for file_id in expected if file_id not in observed]
+
+  def extra_ids(self, expected_ids):
+    expected = set(self._normalize_ids(expected_ids))
+    return [file_id for file_id in self.ids().astype(str).to_list() if file_id not in expected]
+
+  def missing_id_range(self, start, stop, prefix="", suffix="", width=None):
+    return self.missing_ids(self._id_range(start, stop, prefix=prefix, suffix=suffix, width=width))
+
+  def extra_id_range(self, start, stop, prefix="", suffix="", width=None):
+    return self.extra_ids(self._id_range(start, stop, prefix=prefix, suffix=suffix, width=width))
+
+  def ensure_ids(self, expected_ids, extras="keep"):
+    if extras not in {"keep", "drop", "raise"}:
+      raise ValueError("`extras` must be 'keep', 'drop', or 'raise'")
+
+    expected = self._normalize_ids(expected_ids)
+    current = self._df.copy()
+    current[self._id_col] = current[self._id_col].astype(str)
+    extra = [file_id for file_id in current[self._id_col].to_list() if file_id not in set(expected)]
+
+    if extras == "raise" and extra:
+      raise ValueError(f"Manifest contains IDs outside the expected set: {extra}")
+
+    expected_df = DataFrame({self._id_col: expected})
+    merged = expected_df.merge(current, how="left", on=self._id_col)
+
+    if extras == "keep" and extra:
+      extra_rows = current[current[self._id_col].isin(extra)]
+      merged = concat([merged, extra_rows], ignore_index=True)
+
+    self._df = merged.reindex(columns=current.columns)
+    return self.dataframe()
+
+  def ensure_id_range(self, start, stop, prefix="", suffix="", width=None, extras="keep"):
+    return self.ensure_ids(
+      self._id_range(start, stop, prefix=prefix, suffix=suffix, width=width),
+      extras=extras
+    )
+
   def summary(self):
     missing = self._df.isna().sum()
     present = self._df.count()

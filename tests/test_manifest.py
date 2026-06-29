@@ -30,11 +30,22 @@ class IDManifestTest(unittest.TestCase):
   def tearDown(self):
     self.tmp.cleanup()
 
+
+  def make_paths_with_ids(self, filenames):
+    tag1 = os.path.join(self.src, 'range_tag')
+    os.makedirs(tag1)
+    paths = []
+    for filename in filenames:
+      path = os.path.join(tag1, filename)
+      write_file(path)
+      paths.append(path)
+    return paths
+
   def make_id_df(self):
     tag1 = os.path.join(self.src, 'tag1')
     tag2 = os.path.join(self.src, 'tag2')
-    os.makedirs(tag1)
-    os.makedirs(tag2)
+    os.makedirs(tag1, exist_ok=True)
+    os.makedirs(tag2, exist_ok=True)
     write_file(os.path.join(tag1, 'BASE_001_a.txt'))
     write_file(os.path.join(tag2, 'BASE_001_b.txt'))
     write_file(os.path.join(tag2, 'BASE_002_b.txt'))
@@ -138,6 +149,44 @@ class IDManifestTest(unittest.TestCase):
 
     log_value = id_df.log().loc[id_df.log()['id'] == 'BASE_001', 'tag1'].iloc[0]
     self.assertIn('Not all columns match', log_value)
+
+  def test_missing_and_extra_ids_report_expected_set_differences(self):
+    id_df = self.make_id_df()
+
+    self.assertEqual(id_df.missing_ids(['BASE_001', 'BASE_002', 'BASE_003']), ['BASE_003'])
+    self.assertEqual(id_df.extra_ids(['BASE_001']), ['BASE_002'])
+
+  def test_ensure_ids_adds_missing_rows_and_keeps_extras_by_default(self):
+    id_df = self.make_id_df()
+
+    df = id_df.ensure_ids(['BASE_001', 'BASE_003'])
+
+    self.assertEqual(df['id'].to_list(), ['BASE_001', 'BASE_003', 'BASE_002'])
+    self.assertTrue(df.loc[df['id'] == 'BASE_003', 'tag1'].isna().all())
+    self.assertEqual(id_df.shape()[0], 3)
+
+  def test_ensure_ids_can_drop_or_raise_on_extras(self):
+    id_df = self.make_id_df()
+
+    df = id_df.ensure_ids(['BASE_001', 'BASE_003'], extras='drop')
+
+    self.assertEqual(df['id'].to_list(), ['BASE_001', 'BASE_003'])
+    self.assertTrue(df.loc[df['id'] == 'BASE_003', 'tag2'].isna().all())
+
+    id_df = self.make_id_df()
+    with self.assertRaises(ValueError):
+      id_df.ensure_ids(['BASE_001'], extras='raise')
+
+  def test_id_range_helpers_are_inclusive_and_support_prefix_padding_suffix(self):
+    paths = self.make_paths_with_ids(['BASE001_a.txt', 'BASE003_a.txt'])
+    inventory = PathInventory({'tag1': paths}, r'(BASE[0-9]{3})', sort=True)
+    id_df = inventory.to_manifest()
+
+    self.assertEqual(id_df.missing_id_range(1, 3, prefix='BASE', width=3), ['BASE002'])
+    df = id_df.ensure_id_range(1, 3, prefix='BASE', width=3)
+
+    self.assertEqual(df['id'].to_list(), ['BASE001', 'BASE002', 'BASE003'])
+    self.assertTrue(df.loc[df['id'] == 'BASE002', 'tag1'].isna().all())
 
 
 if __name__ == '__main__':
