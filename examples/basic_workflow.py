@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from idmanifest import PathInventory
 
 
-ID_REGEX = r"BASE_([0-9]{3})"
+ID_REGEX = r"SUBJ_([0-9]{3})"
 
 
 def write_csv(path, values):
@@ -31,13 +31,13 @@ def build_example_files(root):
   alpha_dir.mkdir(parents=True)
   beta_dir.mkdir(parents=True)
 
-  write_csv(alpha_dir / "BASE_001_alpha.csv", [1, 2, 3])
-  write_csv(alpha_dir / "BASE_002_alpha.csv", [4, 5, 6])
-  write_csv(alpha_dir / "BASE_002_alpha_duplicate.csv", [7, 8, 9])
+  write_csv(alpha_dir / "SUBJ_001_alpha.csv", [1, 2, 3])
+  write_csv(alpha_dir / "SUBJ_002_alpha.csv", [4, 5, 6])
+  write_csv(alpha_dir / "SUBJ_002_alpha_duplicate.csv", [7, 8, 9])
   write_csv(alpha_dir / "no_id_alpha.csv", [10, 11, 12])
 
-  write_csv(beta_dir / "BASE_001_beta.csv", [13, 14, 15])
-  write_csv(beta_dir / "BASE_003_beta.csv", [16, 17, 18])
+  write_csv(beta_dir / "SUBJ_001_beta.csv", [13, 14, 15])
+  write_csv(beta_dir / "SUBJ_003_beta.csv", [16, 17, 18])
 
   return {
     "alpha": str(alpha_dir / "*.csv"),

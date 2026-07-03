@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pandas import DataFrame
+from pandas import DataFrame, read_csv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from idmanifest import PathInventory
@@ -126,6 +126,44 @@ class IDManifestTest(unittest.TestCase):
     result = id_df.read('tag1', 'BASE_001')
 
     self.assertEqual(result.shape, (1, 1))
+
+  def test_check_file_ids_compares_data_column_to_manifest_id(self):
+    tag1 = os.path.join(self.src, 'file_id_tag')
+    os.makedirs(tag1)
+    match_file = os.path.join(tag1, 'SUBJ_001_scores.csv')
+    mismatch_file = os.path.join(tag1, 'SUBJ_002_scores.csv')
+    DataFrame({'participant_id': ['SUBJ_001'], 'score': [10]}).to_csv(match_file, index=False)
+    DataFrame({'participant_id': ['SUBJ_999'], 'score': [20]}).to_csv(mismatch_file, index=False)
+
+    inventory = PathInventory({'tag1': os.path.join(tag1, '*.csv')}, r'SUBJ_[0-9]{3}', sort=True)
+    id_df = inventory.to_manifest()
+    id_df.add_reader('tag1', read_csv)
+
+    result = id_df.check_file_ids('tag1', id_col='participant_id')
+
+    status_by_id = dict(zip(result['id'], result['status']))
+    file_id_by_id = dict(zip(result['id'], result['file_id']))
+    self.assertEqual(status_by_id['SUBJ_001'], 'match')
+    self.assertEqual(status_by_id['SUBJ_002'], 'mismatch')
+    self.assertEqual(file_id_by_id['SUBJ_002'], 'SUBJ_999')
+
+  def test_check_file_ids_reports_missing_columns_and_multiple_ids(self):
+    tag1 = os.path.join(self.src, 'file_id_errors')
+    os.makedirs(tag1)
+    missing_col_file = os.path.join(tag1, 'SUBJ_001_scores.csv')
+    multiple_id_file = os.path.join(tag1, 'SUBJ_002_scores.csv')
+    DataFrame({'score': [10]}).to_csv(missing_col_file, index=False)
+    DataFrame({'participant_id': ['002', '003'], 'score': [20, 30]}).to_csv(multiple_id_file, index=False)
+
+    inventory = PathInventory({'tag1': os.path.join(tag1, '*.csv')}, r'SUBJ_([0-9]{3})', sort=True)
+    id_df = inventory.to_manifest()
+    id_df.add_reader('tag1', read_csv)
+
+    result = id_df.check_file_ids('tag1', id_col='participant_id')
+
+    status_by_id = dict(zip(result['id'], result['status']))
+    self.assertEqual(status_by_id['001'], 'missing_column')
+    self.assertEqual(status_by_id['002'], 'multiple_ids')
 
   def test_save_helpers_write_manifest_log_and_object(self):
     id_df = self.make_id_df()

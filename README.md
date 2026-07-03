@@ -125,6 +125,13 @@ report.failed_files
 
 Standard checks include invalid IDs, duplicate IDs within a tag, and duplicate file paths across tags.
 
+You can also inspect expected file counts per ID within each tag:
+
+```python
+inventory.check_file_counts(expected=1)
+inventory.check_file_counts(expected={"scores": 1, "events": 2})
+```
+
 When `id_source="path"`, you can also require filename IDs to match path IDs:
 
 ```python
@@ -188,6 +195,12 @@ data = manifest.read("scores", "001")
 manifest.read_all(columns="scores", stop_on_error=False)
 manifest.log()
 manifest.loaded_data("scores")
+```
+
+Check that an ID column inside each file matches the manifest ID:
+
+```python
+manifest.check_file_ids("scores", id_col="participant_id")
 ```
 
 Custom validation functions are supported:

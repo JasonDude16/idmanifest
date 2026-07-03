@@ -6,6 +6,8 @@ from collections.abc import Iterable
 from itertools import combinations
 from pathlib import Path
 
+from pandas import DataFrame
+
 from .manifest import IDManifest
 from .report import CheckReport, _copy_file_dict, _empty_file_dict
 
@@ -237,6 +239,46 @@ class PathInventory:
 
     self._check_results["duplicate_files"] = _copy_file_dict(results)
     return results
+
+  def _expected_count(self, expected, tag):
+    if isinstance(expected, dict):
+      if tag not in expected:
+        raise KeyError(f"No expected count was provided for `{tag}`")
+      return expected[tag]
+    return expected
+
+  def check_file_counts(self, expected=1, tags=None, force=False):
+    if isinstance(expected, dict):
+      for tag, count in expected.items():
+        if not isinstance(count, int) or count < 0:
+          raise ValueError("Expected counts must be non-negative integers")
+    elif not isinstance(expected, int) or expected < 0:
+      raise ValueError("`expected` must be a non-negative integer or tag -> count dictionary")
+
+    invalid = self.check_invalid_ids(tags=tags)
+    if any(len(files) > 0 for files in invalid.values()) and not force:
+      raise ValueError("Not all IDs are valid. Run `.check_invalid_ids()`, or use force=True to skip invalid files.")
+
+    rows = []
+    for tag in self._normalize_tags(tags):
+      counts = OrderedDict()
+      for file in self._kept_files[tag]:
+        file_id = self._extract_id(file)
+        if file_id is None and force:
+          continue
+        counts[file_id] = counts.get(file_id, 0) + 1
+
+      expected_count = self._expected_count(expected, tag)
+      for file_id, count in counts.items():
+        rows.append({
+          "tag": tag,
+          "id": file_id,
+          "count": count,
+          "expected": expected_count,
+          "matches_expected": count == expected_count
+        })
+
+    return DataFrame(rows, columns=["tag", "id", "count", "expected", "matches_expected"])
 
   def check_path_filename_id_mismatches(self, tags=None):
     if self._id_source != "path":

@@ -46,19 +46,19 @@ for directory in (alpha_dir, beta_dir, gamma_dir):
 
 # 2. Create sample files with intentional problems and edge cases.
 section("Create example files")
-write_csv(alpha_dir / "BASE_001_alpha.csv", [1, 2, 3], group="alpha")
-write_csv(alpha_dir / "BASE_002_alpha.csv", [4, 5, 6], group="alpha")
-write_csv(alpha_dir / "BASE_002_alpha_duplicate.csv", [7, 8, 9], group="alpha")
-write_csv(alpha_dir / "BASE_004_practice_alpha.csv", [10, 11], group="alpha")
+write_csv(alpha_dir / "SUBJ_001_alpha.csv", [1, 2, 3], group="alpha")
+write_csv(alpha_dir / "SUBJ_002_alpha.csv", [4, 5, 6], group="alpha")
+write_csv(alpha_dir / "SUBJ_002_alpha_duplicate.csv", [7, 8, 9], group="alpha")
+write_csv(alpha_dir / "SUBJ_004_practice_alpha.csv", [10, 11], group="alpha")
 write_csv(alpha_dir / "no_id_alpha.csv", [12, 13], group="alpha")
 
-write_csv(beta_dir / "BASE_001_beta.csv", [21, 22, 23], group="beta")
-write_csv(beta_dir / "BASE_003_beta.csv", [31, 32, 33], group="beta")
-write_csv(beta_dir / "BASE_004_practice_beta.csv", [41, 42], group="beta")
+write_csv(beta_dir / "SUBJ_001_beta.csv", [21, 22, 23], group="beta")
+write_csv(beta_dir / "SUBJ_003_beta.csv", [31, 32, 33], group="beta")
+write_csv(beta_dir / "SUBJ_004_practice_beta.csv", [41, 42], group="beta")
 
-write_csv(gamma_dir / "BASE_001_gamma.csv", [101, 102], group="gamma", include_note=True)
-write_csv(gamma_dir / "BASE_003_gamma_bad.csv", [-1, 2], group="gamma", include_note=True)
-write_csv(gamma_dir / "BASE_005_gamma.csv", [501, 502], group="gamma", include_note=True)
+write_csv(gamma_dir / "SUBJ_001_gamma.csv", [101, 102], group="gamma", include_note=True)
+write_csv(gamma_dir / "SUBJ_003_gamma_bad.csv", [-1, 2], group="gamma", include_note=True)
+write_csv(gamma_dir / "SUBJ_005_gamma.csv", [501, 502], group="gamma", include_note=True)
 
 paths = {
   "alpha": str(alpha_dir / "*.csv"),
@@ -70,7 +70,7 @@ show("Glob inputs", paths)
 
 # 3. Build a PathInventory with a capture-group ID regex.
 section("Build an inventory")
-inventory = PathInventory(paths, id_regex=r"BASE_([0-9]{3})", sort=True)
+inventory = PathInventory(paths, id_regex=r"SUBJ_([0-9]{3})", sort=True)
 inventory
 inventory.id_regex()
 inventory.paths()
@@ -95,16 +95,18 @@ invalid_only = inventory.check_invalid_ids()
 duplicate_ids_all = inventory.check_duplicate_ids(policy="all", force=True)
 duplicate_ids_extras = inventory.check_duplicate_ids(policy="extras", force=True)
 duplicate_files = inventory.check_duplicate_files()
+file_counts = inventory.check_file_counts(expected=1, force=True)
 invalid_only
 duplicate_ids_all
 duplicate_ids_extras
 duplicate_files
+show("File counts per ID", file_counts)
 
 
 # 5. Demonstrate duplicate policies.
 section("Duplicate ID policies")
-inventory_all_policy = PathInventory(paths, r"BASE_([0-9]{3})", sort=True, duplicate_policy="all")
-inventory_extras_policy = PathInventory(paths, r"BASE_([0-9]{3})", sort=True, duplicate_policy="extras")
+inventory_all_policy = PathInventory(paths, r"SUBJ_([0-9]{3})", sort=True, duplicate_policy="all")
+inventory_extras_policy = PathInventory(paths, r"SUBJ_([0-9]{3})", sort=True, duplicate_policy="extras")
 
 report_all_policy = inventory_all_policy.check()
 report_extras_policy = inventory_extras_policy.check()
@@ -115,10 +117,10 @@ show("Only duplicate extras are flagged", report_extras_policy.details())
 
 # 6. Remove invalid files, duplicate extras, and practice files.
 section("Clean inventory with explicit choices")
-clean_inventory = PathInventory(paths, r"BASE_([0-9]{3})", sort=True, duplicate_policy="extras")
+clean_inventory = PathInventory(paths, r"SUBJ_([0-9]{3})", sort=True, duplicate_policy="extras")
 clean_report = clean_inventory.check()
 
-# Remove only invalid IDs and duplicate extras. This keeps the first BASE_002 alpha file.
+# Remove only invalid IDs and duplicate extras. This keeps the first SUBJ_002 alpha file.
 removed_failed = clean_inventory.remove_failed_checks(
   clean_report,
   checks=["invalid_ids", "duplicate_ids"]
@@ -137,7 +139,7 @@ clean_inventory.removed_files()
 
 # Basename removal works when basenames are unique in the current tag.
 removed_by_basename = clean_inventory.remove_files({
-  "gamma": ["BASE_005_gamma.csv"]
+  "gamma": ["SUBJ_005_gamma.csv"]
 })
 removed_by_basename
 clean_inventory.kept_files()
@@ -145,8 +147,8 @@ clean_inventory.kept_files()
 
 # 7. Demonstrate keep workflows on a separate inventory.
 section("Keep workflows")
-keep_demo = PathInventory(paths, r"BASE_([0-9]{3})", sort=True, duplicate_policy="extras")
-keep_demo.keep_matching({"alpha": "BASE_001|BASE_002"})
+keep_demo = PathInventory(paths, r"SUBJ_([0-9]{3})", sort=True, duplicate_policy="extras")
+keep_demo.keep_matching({"alpha": "SUBJ_001|SUBJ_002"})
 keep_demo.kept_files()
 keep_demo.removed_files()
 keep_demo.reset()
@@ -157,10 +159,10 @@ keep_demo.kept_files()
 section("Explicit file lists and empty tags")
 explicit_inventory = PathInventory(
   {
-    "alpha": [alpha_dir / "BASE_001_alpha.csv", alpha_dir / "BASE_002_alpha.csv"],
+    "alpha": [alpha_dir / "SUBJ_001_alpha.csv", alpha_dir / "SUBJ_002_alpha.csv"],
     "empty_ok": []
   },
-  id_regex=r"BASE_([0-9]{3})",
+  id_regex=r"SUBJ_([0-9]{3})",
   sort=True,
   allow_empty=True
 )
@@ -171,12 +173,12 @@ explicit_inventory.check().summary()
 # 9. Demonstrate named and explicit ID groups.
 section("ID extraction styles")
 named_group_inventory = PathInventory(
-  {"alpha": str(alpha_dir / "BASE_001_alpha.csv")},
-  id_regex=r"BASE_(?P<id>[0-9]{3})"
+  {"alpha": str(alpha_dir / "SUBJ_001_alpha.csv")},
+  id_regex=r"SUBJ_(?P<id>[0-9]{3})"
 )
 explicit_group_inventory = PathInventory(
-  {"alpha": str(alpha_dir / "BASE_001_alpha.csv")},
-  id_regex=r"(BASE)_([0-9]{3})",
+  {"alpha": str(alpha_dir / "SUBJ_001_alpha.csv")},
+  id_regex=r"(SUBJ)_([0-9]{3})",
   id_group=2
 )
 
@@ -192,8 +194,8 @@ mixed_beta_dir = mixed_id_dir / "beta"
 mixed_alpha_dir.mkdir(parents=True)
 mixed_beta_dir.mkdir(parents=True)
 
-write_csv(mixed_alpha_dir / "BASE_101_alpha.csv", [101], group="alpha")
-write_csv(mixed_beta_dir / "BASE101_beta.csv", [101], group="beta")
+write_csv(mixed_alpha_dir / "SUBJ_101_alpha.csv", [101], group="alpha")
+write_csv(mixed_beta_dir / "SUBJ101_beta.csv", [101], group="beta")
 
 normalize_base_id = lambda file_id: file_id.replace("_", "")
 normalized_inventory = PathInventory(
@@ -201,7 +203,7 @@ normalized_inventory = PathInventory(
     "alpha": str(mixed_alpha_dir / "*.csv"),
     "beta": str(mixed_beta_dir / "*.csv")
   },
-  id_regex=r"BASE_?[0-9]{3}",
+  id_regex=r"SUBJ_?[0-9]{3}",
   id_normalizer=normalize_base_id,
   sort=True
 )
@@ -212,17 +214,17 @@ show("Normalized manifest IDs with original paths", normalized_manifest.datafram
 # 11. Demonstrate path-based ID extraction for ID-folder layouts.
 section("Path-based ID extraction")
 id_folder_root = data_dir / "by_id"
-id_folder_alpha_101 = id_folder_root / "BASE_101" / "session_1" / "exports" / "alpha"
-id_folder_alpha_102 = id_folder_root / "BASE_102" / "session_1" / "exports" / "alpha"
-id_folder_beta_101 = id_folder_root / "BASE_101" / "session_1" / "nested" / "beta"
-id_folder_beta_102 = id_folder_root / "BASE_102" / "session_2" / "nested" / "beta"
+id_folder_alpha_101 = id_folder_root / "SUBJ_101" / "session_1" / "exports" / "alpha"
+id_folder_alpha_102 = id_folder_root / "SUBJ_102" / "session_1" / "exports" / "alpha"
+id_folder_beta_101 = id_folder_root / "SUBJ_101" / "session_1" / "nested" / "beta"
+id_folder_beta_102 = id_folder_root / "SUBJ_102" / "session_2" / "nested" / "beta"
 for directory in (id_folder_alpha_101, id_folder_alpha_102, id_folder_beta_101, id_folder_beta_102):
   directory.mkdir(parents=True)
 
-write_csv(id_folder_alpha_101 / "BASE_101_result.csv", [101, 102], group="alpha")
-write_csv(id_folder_alpha_102 / "BASE_102_result.csv", [201, 202], group="alpha")
-write_csv(id_folder_beta_101 / "BASE_101_summary.csv", [301, 302], group="beta")
-write_csv(id_folder_beta_102 / "BASE_999_summary.csv", [401, 402], group="beta")
+write_csv(id_folder_alpha_101 / "SUBJ_101_result.csv", [101, 102], group="alpha")
+write_csv(id_folder_alpha_102 / "SUBJ_102_result.csv", [201, 202], group="alpha")
+write_csv(id_folder_beta_101 / "SUBJ_101_summary.csv", [301, 302], group="beta")
+write_csv(id_folder_beta_102 / "SUBJ_999_summary.csv", [401, 402], group="beta")
 
 id_folder_paths = {
   "alpha": str(id_folder_root / "*" / "session_*" / "exports" / "alpha" / "*.csv"),
@@ -231,7 +233,7 @@ id_folder_paths = {
 
 path_id_inventory = PathInventory(
   id_folder_paths,
-  id_regex=r"BASE_([0-9]{3})",
+  id_regex=r"SUBJ_([0-9]{3})",
   id_source="path",
   sort=True
 )
@@ -269,12 +271,12 @@ base_manifest.missing_id_range(1, 5, width=3)
 base_manifest.ensure_id_range(1, 5, width=3, extras="keep")
 base_manifest.dataframe()
 
-# This mirrors a BASE_101-BASE_260 workflow when your extracted IDs include the prefix.
-base_prefixed = PathInventory({"alpha": str(alpha_dir / "*.csv")}, r"(BASE_[0-9]{3})", sort=True, duplicate_policy="extras")
+# This mirrors a SUBJ_101-SUBJ_260 workflow when your extracted IDs include the prefix.
+base_prefixed = PathInventory({"alpha": str(alpha_dir / "*.csv")}, r"(SUBJ_[0-9]{3})", sort=True, duplicate_policy="extras")
 base_prefixed.remove_failed_checks(base_prefixed.check(), checks=["invalid_ids", "duplicate_ids"])
 base_prefixed_manifest = base_prefixed.to_manifest()
-base_prefixed_manifest.missing_id_range(1, 5, prefix="BASE_", width=3)
-base_prefixed_manifest.ensure_id_range(1, 5, prefix="BASE_", width=3, extras="keep")
+base_prefixed_manifest.missing_id_range(1, 5, prefix="SUBJ_", width=3)
+base_prefixed_manifest.ensure_id_range(1, 5, prefix="SUBJ_", width=3, extras="keep")
 base_prefixed_manifest.dataframe()
 
 
@@ -408,9 +410,9 @@ sorted(path.name for path in (copy_root / "gamma").glob("*.csv"))
 incremental_copy_root = root / "incremental_copy"
 incremental_alpha = incremental_copy_root / "alpha"
 incremental_alpha.mkdir(parents=True)
-(incremental_alpha / "BASE_001_alpha.csv").write_text("already copied")
+(incremental_alpha / "SUBJ_001_alpha.csv").write_text("already copied")
 manifest.copy_files(incremental_copy_root, mk_dirs=True, copy_new_only=True)
-(incremental_alpha / "BASE_001_alpha.csv").read_text()
+(incremental_alpha / "SUBJ_001_alpha.csv").read_text()
 sorted(path.name for path in (incremental_copy_root / "alpha").glob("*.csv"))
 sorted(path.name for path in (incremental_copy_root / "beta").glob("*.csv"))
 
@@ -418,9 +420,9 @@ sorted(path.name for path in (incremental_copy_root / "beta").glob("*.csv"))
 overwrite_copy_root = root / "overwrite_copy"
 overwrite_alpha = overwrite_copy_root / "alpha"
 overwrite_alpha.mkdir(parents=True)
-(overwrite_alpha / "BASE_001_alpha.csv").write_text("old contents")
+(overwrite_alpha / "SUBJ_001_alpha.csv").write_text("old contents")
 manifest.copy_files(overwrite_copy_root, mk_dirs=True, overwrite=True)
-(overwrite_alpha / "BASE_001_alpha.csv").read_text()
+(overwrite_alpha / "SUBJ_001_alpha.csv").read_text()
 
 copied_manifest = manifest.replace_paths(use_copy_root_path=True)
 copied_manifest
@@ -437,9 +439,9 @@ loaded_manifest.dataframe()
 
 # 23. Refresh example after adding a new file.
 section("Refresh inventory")
-refresh_inventory = PathInventory({"alpha": str(alpha_dir / "*.csv")}, r"BASE_([0-9]{3})", sort=True)
+refresh_inventory = PathInventory({"alpha": str(alpha_dir / "*.csv")}, r"SUBJ_([0-9]{3})", sort=True)
 len(refresh_inventory.all_files()["alpha"])
-write_csv(alpha_dir / "BASE_006_alpha_new.csv", [61, 62], group="alpha")
+write_csv(alpha_dir / "SUBJ_006_alpha_new.csv", [61, 62], group="alpha")
 refresh_inventory.refresh()
 len(refresh_inventory.all_files()["alpha"])
 refresh_inventory.all_files()

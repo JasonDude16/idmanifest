@@ -133,6 +133,33 @@ class PathInventoryTest(unittest.TestCase):
 
     self.assertEqual(duplicate_files, ['BASE_001_b.txt', 'BASE_001_c.txt'])
 
+  def test_check_file_counts_reports_counts_by_tag_and_id(self):
+    paths = self.make_paths({
+      'tag1': ['subject-001_a.txt', 'subject-001_b.txt', 'subject-002_a.txt'],
+      'tag2': ['subject-001_c.txt', 'subject-002_c.txt']
+    })
+
+    inventory = PathInventory(paths, r'subject-([0-9]{3})', sort=True)
+    results = inventory.check_file_counts(expected=1)
+
+    tag1_001 = results[(results['tag'] == 'tag1') & (results['id'] == '001')].iloc[0]
+    tag1_002 = results[(results['tag'] == 'tag1') & (results['id'] == '002')].iloc[0]
+    self.assertEqual(tag1_001['count'], 2)
+    self.assertEqual(tag1_001['expected'], 1)
+    self.assertEqual(tag1_001['matches_expected'], False)
+    self.assertEqual(tag1_002['matches_expected'], True)
+
+  def test_check_file_counts_accepts_expected_counts_by_tag(self):
+    paths = self.make_paths({
+      'tag1': ['subject-001_a.txt', 'subject-001_b.txt'],
+      'tag2': ['subject-001_c.txt']
+    })
+
+    inventory = PathInventory(paths, r'subject-([0-9]{3})', sort=True)
+    results = inventory.check_file_counts(expected={'tag1': 2, 'tag2': 1})
+
+    self.assertTrue(results['matches_expected'].all())
+
   def test_id_normalizer_merges_ids_without_changing_paths(self):
     paths = self.make_paths({
       'tag1': ['BASE_001_a.txt'],

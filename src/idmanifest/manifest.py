@@ -286,6 +286,63 @@ class IDManifest:
       if result is not None and not result:
         raise AssertionError("Custom validation function failed")
 
+  def check_file_ids(self, column, id_col):
+    if column not in list(self.columns()):
+      raise KeyError(f"{column} not found in manifest")
+    if column not in self._readers:
+      raise KeyError(f"You must first add a reader for `{column}`")
+    if not isinstance(id_col, str):
+      raise TypeError("`id_col` must be a string")
+
+    rows = []
+    reader = self._readers[column]
+    for _, manifest_row in self._df.iterrows():
+      file_id = manifest_row[self._id_col]
+      file = manifest_row[column]
+      row = {
+        self._id_col: file_id,
+        "column": column,
+        "file": file,
+        "file_id": None,
+        "status": None,
+        "error": None
+      }
+
+      if isna(file):
+        row["status"] = "missing_file"
+        rows.append(row)
+        continue
+
+      try:
+        data = reader["func"](file, **reader["kwargs"])
+      except Exception as error:
+        row["status"] = "read_error"
+        row["error"] = str(error)
+        rows.append(row)
+        continue
+
+      if id_col not in list(data.columns):
+        row["status"] = "missing_column"
+        row["error"] = f"{id_col} not found"
+        rows.append(row)
+        continue
+
+      observed = [
+        str(self._normalize_id(str(value)))
+        for value in data[id_col].dropna().unique()
+      ]
+      if len(observed) == 0:
+        row["status"] = "missing_file_id"
+      elif len(observed) > 1:
+        row["file_id"] = observed
+        row["status"] = "multiple_ids"
+      else:
+        row["file_id"] = observed[0]
+        row["status"] = "match" if observed[0] == str(file_id) else "mismatch"
+      rows.append(row)
+
+    return DataFrame(rows, columns=[self._id_col, "column", "file", "file_id", "status", "error"])
+
   def read(self, column, file_id, validate=True):
     if column not in list(self.columns()):
       raise KeyError(f"{column} not found in manifest")
