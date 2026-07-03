@@ -2,19 +2,11 @@
 
 Create validated, ID-indexed manifests for research files.
 
-`idmanifest` helps turn folders of study files into a table where each row is a participant, sample, session, or other study ID, and each column points to one kind of file. It is designed for workflows where files arrive over time, naming conventions vary a little, and researchers need a clear record of what is present, missing, duplicated, readable, or invalid.
+`idmanifest` turns folders of study files into a table where each row is an ID and each column points to one kind of file. It is useful when files arrive over time, IDs appear in filenames or folder paths, and researchers need a clear record of what is present, missing, duplicated, readable, or invalid.
 
-The package never deletes files. Inventory cleanup methods only remove files from the in-memory inventory before creating a manifest. Copy helpers copy files to a new location when requested.
-
-## Core Objects
-
-- `PathInventory`: finds files, extracts IDs, runs checks, and lets you keep/remove paths before manifest creation.
-- `CheckReport`: summarizes inventory problems and gives detailed rows for cleanup decisions.
-- `IDManifest`: stores the ID-indexed path table, reads and validates files, creates tracker outputs, copies files, and saves results.
+The package never deletes files. Cleanup methods only remove paths from an in-memory inventory before creating a manifest. Copy helpers copy files to a new location when requested.
 
 ## Install
-
-From this repository:
 
 ```bash
 python -m pip install -e .
@@ -27,19 +19,25 @@ python -m pip install -e ".[dev]"
 python -m unittest discover -s tests -v
 ```
 
-## Quick Start
+## Core Objects
+
+- `PathInventory`: finds files, extracts IDs, runs checks, and lets you keep or remove paths before manifest creation.
+- `CheckReport`: summarizes inventory problems and provides detailed rows for cleanup decisions.
+- `IDManifest`: stores the ID-indexed path table, reads and validates files, builds tracker outputs, copies files, and saves results.
+
+## Basic Workflow
 
 ```python
 from idmanifest import PathInventory
 
 paths = {
-  "hypnogram": "data/hypnograms/*.xlsx",
-  "artifact": "data/artifacts/*.xlsx"
+  "scores": "data/scores/*.csv",
+  "metadata": "data/metadata/*.csv"
 }
 
 inventory = PathInventory(
   paths,
-  id_regex=r"BASE_([0-9]{3})",
+  id_regex=r"SUBJ_([0-9]{3})",
   sort=True,
   duplicate_policy="extras"
 )
@@ -55,122 +53,66 @@ manifest = inventory.to_manifest()
 manifest.save("manifest.csv", index=False)
 ```
 
-## Inputs
+## Inputs And ID Extraction
 
-Each manifest column starts as a tag mapped to either a glob pattern or an explicit file list.
-
-```python
-paths = {
-  "alpha": "data/alpha/*.csv",
-  "beta": "data/beta/*.csv"
-}
-
-inventory = PathInventory(paths, id_regex=r"BASE_([0-9]{3})")
-```
-
-Explicit file lists are also supported:
+Each tag can point to a glob pattern or explicit file list:
 
 ```python
-inventory = PathInventory(
-  {"alpha": ["data/alpha/BASE_001_alpha.csv"]},
-  id_regex=r"BASE_([0-9]{3})"
+PathInventory({"scores": "data/scores/*.csv"}, id_regex=r"SUBJ_([0-9]{3})")
+
+PathInventory(
+  {"scores": ["data/scores/SUBJ_001_scores.csv"]},
+  id_regex=r"SUBJ_([0-9]{3})"
 )
 ```
 
-Empty file groups raise by default. Use `allow_empty=True` when an empty tag is expected:
+`id_regex` controls ID extraction:
 
 ```python
-inventory = PathInventory(
-  {"alpha": [], "beta": "data/beta/*.csv"},
-  id_regex=r"BASE_([0-9]{3})",
-  allow_empty=True
-)
+PathInventory(paths, id_regex=r"SUBJ_[0-9]{3}")              # whole match
+PathInventory(paths, id_regex=r"SUBJ_([0-9]{3})")            # first capture group
+PathInventory(paths, id_regex=r"SUBJ_(?P<id>[0-9]{3})")      # named id group
+PathInventory(paths, id_regex=r"(SUBJ)_([0-9]{3})", id_group=2)
 ```
 
-## ID Extraction
-
-IDs come from `id_regex`. By default, IDs are extracted from filenames.
-
-If the regex has no capture groups, the whole match is used:
-
-```python
-PathInventory(paths, id_regex=r"BASE_[0-9]{3}")
-```
-
-If the regex has one capture group, that group is used:
-
-```python
-PathInventory(paths, id_regex=r"BASE_([0-9]{3})")
-```
-
-A named `id` group is supported:
-
-```python
-PathInventory(paths, id_regex=r"BASE_(?P<id>[0-9]{3})")
-```
-
-You can also select a specific group:
-
-```python
-PathInventory(paths, id_regex=r"(BASE)_([0-9]{3})", id_group=2)
-```
+Use `allow_empty=True` when an empty tag is valid for your workflow.
 
 ## IDs In Folder Paths
 
-Some studies store files under participant folders:
+By default, IDs are extracted from filenames. Use `id_source="path"` when IDs are in folder paths:
 
 ```text
 data/
-  BASE_001/
-    session_1/
-      exports/
-        hypnogram.csv
-  BASE_002/
-    session_1/
-      exports/
-        hypnogram.csv
+  SUBJ_001/session-1/scores.csv
+  SUBJ_002/session-1/scores.csv
 ```
-
-Use `id_source="path"` to search the full path instead of only the filename:
 
 ```python
 inventory = PathInventory(
-  {
-    "hypnogram": "data/*/session_*/exports/*.csv",
-    "artifact": "data/*/artifacts/**/*.csv"
-  },
-  id_regex=r"BASE_([0-9]{3})",
+  {"scores": "data/*/session-*/scores.csv"},
+  id_regex=r"SUBJ_([0-9]{3})",
   id_source="path",
   sort=True
 )
 ```
 
-This is useful with nested glob patterns where the ID folder is not the immediate parent directory.
+This also works with deeper glob patterns.
 
 ## Normalizing Equivalent IDs
 
-Use `id_normalizer` when equivalent IDs appear in slightly different raw forms, such as `BASE_001` and `BASE001`.
+Use `id_normalizer` when equivalent IDs appear in different raw styles, such as `SUBJ_001` and `SUBJ001`.
 
 ```python
 inventory = PathInventory(
   paths,
-  id_regex=r"BASE_?[0-9]{3}",
+  id_regex=r"SUBJ_?[0-9]{3}",
   id_normalizer=lambda file_id: file_id.replace("_", "")
 )
 ```
 
-The regex must match every raw style you expect. The normalizer only changes the extracted ID used by checks and the manifest. It does not edit files or paths.
+The regex must match the raw styles you expect. The normalizer only changes the extracted ID used for checks and manifest rows; it does not edit files or paths.
 
-```text
-data/alpha/BASE_001_alpha.csv  -> manifest id BASE001
-data/beta/BASE001_beta.csv     -> manifest id BASE001
-```
-
-The original paths remain in the manifest path columns.
-
-## Inventory Checks
-
-Run all standard checks:
+## Checks And Reports
 
 ```python
 report = inventory.check()
@@ -181,94 +123,44 @@ report.details()
 report.failed_files
 ```
 
-Standard checks include:
+Standard checks include invalid IDs, duplicate IDs within a tag, and duplicate file paths across tags.
 
-- `invalid_ids`: files where no ID could be extracted
-- `duplicate_ids`: repeated IDs within the same tag
-- `duplicate_files`: the same file path appearing under more than one tag
-
-Duplicate ID handling can flag every duplicate or only later extras:
+When `id_source="path"`, you can also require filename IDs to match path IDs:
 
 ```python
-inventory.check_duplicate_ids(policy="all")
-inventory.check_duplicate_ids(policy="extras")
-```
-
-You can also set the default policy:
-
-```python
-inventory = PathInventory(
-  paths,
-  id_regex=r"BASE_([0-9]{3})",
-  duplicate_policy="extras"
-)
-```
-
-### Path And Filename ID Agreement
-
-When `id_source="path"`, filenames may also contain IDs. You can optionally require the path ID and filename ID to agree.
-
-```python
-inventory = PathInventory(
-  paths,
-  id_regex=r"BASE_?[0-9]{3}",
-  id_source="path",
-  id_normalizer=lambda file_id: file_id.replace("_", "")
-)
-
 report = inventory.check(check_path_filename_ids=True)
 ```
 
-This catches cases like:
+This catches paths like:
 
 ```text
-data/BASE_102/session/BASE_999_summary.csv
-data/WATCH01/session/measurement.csv
+data/SUBJ_002/session-1/SUBJ_999_scores.csv
+data/SUBJ_003/session-1/scores.csv
 ```
 
-The first has a conflicting filename ID. The second has no filename ID at all. When enabled, the check appears in `summary()`, `counts()`, `details()`, and `failed_files` as `path_filename_id_mismatches`.
+where the filename ID conflicts with the folder ID or is missing. When enabled, this appears as `path_filename_id_mismatches` in the report.
 
-You can enforce this during manifest creation:
+## Cleaning The Inventory
 
-```python
-manifest = inventory.to_manifest(check_path_filename_ids=True)
-```
-
-## Keeping And Removing Paths
-
-Cleanup methods alter the inventory, not the filesystem.
+These methods update the inventory only; they do not delete files.
 
 ```python
-inventory.remove_matching({"artifact": "practice"})
-inventory.keep_matching({"hypnogram": "night1"})
-inventory.remove_files({"artifact": ["BASE_101_bad.xlsx"]})
+inventory.remove_matching({"scores": "practice"})
+inventory.keep_matching({"scores": "visit1"})
+inventory.remove_files({"scores": ["SUBJ_001_bad.csv"]})
 inventory.remove_failed_checks(report, checks=["invalid_ids", "duplicate_ids"])
 ```
 
-These methods return per-tag counts so scripts can log cleanup decisions.
-
-You can inspect what remains and what was removed:
+Inspect or reset the inventory:
 
 ```python
 inventory.kept_files()
 inventory.removed_files()
-```
-
-Reset back to all currently discovered files:
-
-```python
 inventory.reset()
-```
-
-Refresh after new files arrive:
-
-```python
 inventory.refresh()
 ```
 
-## Creating A Manifest
-
-After cleanup, create an `IDManifest`:
+## Working With A Manifest
 
 ```python
 manifest = inventory.to_manifest()
@@ -276,149 +168,47 @@ manifest.dataframe()
 manifest.summary()
 ```
 
-The manifest is a path table:
-
-```text
-id    hypnogram                         artifact
-001   data/hypnograms/BASE_001.xlsx     data/artifacts/BASE_001.xlsx
-002   data/hypnograms/BASE_002.xlsx     NaN
-```
-
-`summary()` reports present and missing values by column.
-
-## Expected IDs
-
-Use expected IDs when a study should contain a known set of participants or sessions.
+Add expected IDs when you know the desired study roster:
 
 ```python
 manifest.missing_ids(["001", "002", "003"])
-manifest.extra_ids(["001", "002", "003"])
-```
-
-`ensure_ids()` makes missing expected IDs explicit by adding rows with missing paths:
-
-```python
 manifest.ensure_ids(["001", "002", "003"], extras="keep")
+manifest.ensure_id_range(1, 100, width=3)
 ```
 
-Numeric range helpers are inclusive:
-
-```python
-manifest.missing_id_range(1, 260, width=3)
-manifest.ensure_id_range(1, 260, width=3)
-```
-
-Prefixes and suffixes are supported:
-
-```python
-manifest.ensure_id_range(1, 260, prefix="BASE_", width=3)
-```
-
-Extras can be kept, dropped, or treated as an error:
-
-```python
-manifest.ensure_ids(expected_ids, extras="keep")
-manifest.ensure_ids(expected_ids, extras="drop")
-manifest.ensure_ids(expected_ids, extras="raise")
-```
-
-## Reading And Validating Data
-
-Register readers by manifest column:
+Register readers and validation rules:
 
 ```python
 import pandas as pd
 
-manifest.add_reader("hypnogram", pd.read_excel, engine="openpyxl")
-manifest.add_reader("artifact", pd.read_csv)
-```
+manifest.add_reader("scores", pd.read_csv)
+manifest.add_validation("scores", colnames=["score", "date"], ncols=2)
 
-Register validation rules:
-
-```python
-manifest.add_validation(
-  "hypnogram",
-  colnames=["epoch", "stage"],
-  ncols=2,
-  allow_missing_values=False
-)
+data = manifest.read("scores", "001")
+manifest.read_all(columns="scores", stop_on_error=False)
+manifest.log()
+manifest.loaded_data("scores")
 ```
 
 Custom validation functions are supported:
 
 ```python
-def has_required_rows(df, minimum):
+def has_rows(df, minimum):
   return len(df) >= minimum
 
-manifest.add_validation("hypnogram", func=has_required_rows, minimum=100)
-```
-
-Read one file:
-
-```python
-data = manifest.read("hypnogram", "001")
-```
-
-Read all files, or a subset of columns and IDs:
-
-```python
-manifest.read_all(stop_on_error=False)
-manifest.read_all(columns="hypnogram", stop_on_error=False)
-manifest.read_all(columns=["hypnogram", "artifact"], ids=["001", "002"], stop_on_error=False)
-```
-
-Inspect read outcomes:
-
-```python
-manifest.log()
-manifest.loaded_data("hypnogram")
-manifest.loaded_data("hypnogram", "001")
-```
-
-Use `keep_data=False` when you only want the read/validation log and do not want to keep loaded data in memory:
-
-```python
-manifest.read_all(columns="hypnogram", keep_data=False, stop_on_error=False)
+manifest.add_validation("scores", func=has_rows, minimum=10)
 ```
 
 ## Tracker Output
 
-`tracker()` creates a researcher-friendly table that combines paths, missingness, reader/validation registration, read status, validation errors, and loaded data shapes.
+`tracker()` creates a status table with paths, missingness, reader/validation registration, read status, errors, and data shapes.
 
 ```python
 tracker = manifest.tracker()
-manifest.save_tracker("master_tracker.csv", index=False)
+manifest.save_tracker("tracker.csv", index=False)
 ```
 
-Per-tag columns include:
-
-```text
-<tag>_path
-<tag>_present
-<tag>_reader_registered
-<tag>_validation_registered
-<tag>_read_status
-<tag>_read_error
-<tag>_nrows
-<tag>_ncols
-```
-
-Overall columns include:
-
-```text
-overall_present_count
-overall_missing_count
-overall_error_count
-overall_pending_count
-overall_status
-```
-
-`overall_status` is one of:
-
-- `complete`
-- `pending`
-- `incomplete`
-- `error`
+It includes per-tag columns such as `<tag>_present`, `<tag>_read_status`, `<tag>_read_error`, `<tag>_nrows`, and `<tag>_ncols`, plus overall status counts.
 
 ## Copying Files
 
@@ -428,9 +218,7 @@ Copy manifest files into a standardized output tree:
 manifest.copy_files("copied_files", mk_dirs=True)
 ```
 
-By default, copying to a non-empty destination tag folder raises an error. This protects existing files.
-
-For incremental study updates, copy only files that are not already present:
+For incremental updates, copy only files that are not already present:
 
 ```python
 manifest.copy_files("copied_files", mk_dirs=True, copy_new_only=True)
@@ -442,32 +230,18 @@ To intentionally replace destination files:
 manifest.copy_files("copied_files", mk_dirs=True, overwrite=True)
 ```
 
-`overwrite=True` and `copy_new_only=True` cannot both be used.
-
 After copying, rewrite manifest paths to point at the copy destination:
 
 ```python
 manifest.replace_paths(use_copy_root_path=True)
 ```
 
-You can also provide replacement roots manually:
-
-```python
-manifest.replace_paths({"hypnogram": "/new/root"})
-```
-
 ## Saving And Loading
-
-Save the manifest and read log as CSV:
 
 ```python
 manifest.save("manifest.csv", index=False)
 manifest.save_log("read_log.csv", index=False)
-```
 
-Load CSVs back into the object:
-
-```python
 manifest.load("manifest.csv")
 manifest.load_log("read_log.csv")
 ```
@@ -483,16 +257,9 @@ Never load pickle files from untrusted sources.
 
 ## Examples
 
-Run a complete terminal example:
-
 ```bash
 python examples/basic_workflow.py
-```
-
-For a fuller line-by-line IDE walkthrough:
-
-```bash
 python examples/interactive_workflow.py
 ```
 
-The interactive workflow demonstrates inventory inspection, reports, duplicate policies, keep/remove workflows, explicit file lists, ID extraction styles, ID normalization, path-based IDs, path/filename ID agreement checks, expected IDs, manifest reading/validation, tracker output, copying files, path replacement, CSV output, pickle output, and refresh behavior.
+The interactive workflow demonstrates inventory inspection, reports, duplicate policies, keep/remove workflows, explicit file lists, ID extraction styles, ID normalization, path-based IDs, path/filename ID checks, expected IDs, manifest reading/validation, tracker output, copying files, path replacement, CSV output, pickle output, and refresh behavior.
