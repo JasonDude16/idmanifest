@@ -19,6 +19,11 @@ def dataframe_reader(path):
   return DataFrame({'path': [path]})
 
 
+def read_file(path):
+  with open(path) as f:
+    return f.read()
+
+
 class IDManifestTest(unittest.TestCase):
 
   def setUp(self):
@@ -89,6 +94,15 @@ class IDManifestTest(unittest.TestCase):
 
     self.assertEqual(id_df.loaded_data('tag1'), {})
 
+  def test_read_all_accepts_single_column_string(self):
+    id_df = self.make_id_df()
+
+    id_df.add_reader('tag1', dataframe_reader)
+    id_df.read_all(columns='tag1', validate=False)
+
+    self.assertEqual(list(id_df.loaded_data().keys()), ['tag1'])
+    self.assertEqual(list(id_df.loaded_data('tag1').keys()), ['BASE_001'])
+
   def test_custom_assertion_function_runs(self):
     id_df = self.make_id_df()
     df = DataFrame({'a': [1], 'b': [2]})
@@ -136,6 +150,52 @@ class IDManifestTest(unittest.TestCase):
     self.assertEqual(loaded_log.shape[0], id_df.shape()[0])
     self.assertEqual(list(loaded.ids()), list(id_df.ids()))
 
+  def test_copy_files_raises_on_nonempty_destination_by_default(self):
+    id_df = self.make_id_df()
+    out_root = os.path.join(self.root, 'copy-default')
+    out_tag1 = os.path.join(out_root, 'tag1')
+    os.makedirs(out_tag1)
+    write_file(os.path.join(out_tag1, 'existing.txt'))
+
+    with self.assertRaises(FileExistsError):
+      id_df.copy_files(out_root)
+
+  def test_copy_files_can_skip_existing_and_copy_new_files(self):
+    id_df = self.make_id_df()
+    out_root = os.path.join(self.root, 'copy-new-only')
+    out_tag1 = os.path.join(out_root, 'tag1')
+    out_tag2 = os.path.join(out_root, 'tag2')
+    os.makedirs(out_tag1)
+    os.makedirs(out_tag2)
+    existing = os.path.join(out_tag1, 'BASE_001_a.txt')
+    write_file(existing, 'already copied')
+
+    id_df.copy_files(out_root, copy_new_only=True)
+
+    self.assertEqual(read_file(existing), 'already copied')
+    self.assertEqual(read_file(os.path.join(out_tag2, 'BASE_001_b.txt')), 'value')
+    self.assertEqual(read_file(os.path.join(out_tag2, 'BASE_002_b.txt')), 'value')
+
+  def test_copy_files_overwrite_replaces_existing_files(self):
+    id_df = self.make_id_df()
+    out_root = os.path.join(self.root, 'copy-overwrite')
+    out_tag1 = os.path.join(out_root, 'tag1')
+    out_tag2 = os.path.join(out_root, 'tag2')
+    os.makedirs(out_tag1)
+    os.makedirs(out_tag2)
+    existing = os.path.join(out_tag1, 'BASE_001_a.txt')
+    write_file(existing, 'old contents')
+
+    id_df.copy_files(out_root, overwrite=True)
+
+    self.assertEqual(read_file(existing), 'value')
+
+  def test_copy_files_rejects_overwrite_and_copy_new_only_together(self):
+    id_df = self.make_id_df()
+
+    with self.assertRaises(ValueError):
+      id_df.copy_files(self.root, overwrite=True, copy_new_only=True)
+
   def test_read_all_logs_reader_and_validation_errors(self):
     id_df = self.make_id_df()
 
@@ -149,6 +209,55 @@ class IDManifestTest(unittest.TestCase):
 
     log_value = id_df.log().loc[id_df.log()['id'] == 'BASE_001', 'tag1'].iloc[0]
     self.assertIn('Not all columns match', log_value)
+
+  def test_tracker_reports_presence_registration_and_read_status(self):
+    id_df = self.make_id_df()
+    id_df.add_reader('tag1', dataframe_reader)
+    id_df.add_validation('tag1', ncols=1)
+
+    before = id_df.tracker()
+    base001 = before.loc[before['id'] == 'BASE_001'].iloc[0]
+    base002 = before.loc[before['id'] == 'BASE_002'].iloc[0]
+
+    self.assertEqual(base001['tag1_present'], True)
+    self.assertEqual(base001['tag1_reader_registered'], True)
+    self.assertEqual(base001['tag1_validation_registered'], True)
+    self.assertEqual(base001['tag1_read_status'], 'not_read')
+    self.assertEqual(base001['overall_status'], 'pending')
+    self.assertEqual(base002['tag1_present'], False)
+    self.assertEqual(base002['tag1_read_status'], 'missing')
+    self.assertEqual(base002['overall_status'], 'incomplete')
+
+    id_df.read_all(columns=['tag1'])
+    after = id_df.tracker()
+    base001 = after.loc[after['id'] == 'BASE_001'].iloc[0]
+
+    self.assertEqual(base001['tag1_read_status'], 'read')
+    self.assertEqual(base001['tag1_read_error'], None)
+    self.assertEqual(base001['tag1_nrows'], 1)
+    self.assertEqual(base001['tag1_ncols'], 1)
+
+  def test_tracker_reports_read_errors_and_saves_csv(self):
+    id_df = self.make_id_df()
+
+    def bad_reader(path):
+      return DataFrame({'wrong': [1]})
+
+    id_df.add_reader('tag1', bad_reader)
+    id_df.add_validation('tag1', colnames=['path'])
+    id_df.read_all(columns=['tag1'], stop_on_error=False)
+
+    tracker = id_df.tracker()
+    base001 = tracker.loc[tracker['id'] == 'BASE_001'].iloc[0]
+    tracker_path = os.path.join(self.root, 'tracker.csv')
+
+    id_df.save_tracker(tracker_path, index=False)
+
+    self.assertEqual(base001['tag1_read_status'], 'error')
+    self.assertIn('Not all columns match', base001['tag1_read_error'])
+    self.assertEqual(base001['overall_error_count'], 1)
+    self.assertEqual(base001['overall_status'], 'error')
+    self.assertTrue(os.path.isfile(tracker_path))
 
   def test_missing_and_extra_ids_report_expected_set_differences(self):
     id_df = self.make_id_df()

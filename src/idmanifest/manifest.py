@@ -6,17 +6,24 @@ from collections import OrderedDict
 from pathlib import Path
 import warnings
 
-from pandas import DataFrame, concat, read_csv
+from pandas import DataFrame, concat, isna, read_csv
 
 
 class IDManifest:
   """ID-indexed table of paths plus optional readers and data validation."""
 
-  def __init__(self, id_regex, files_by_tag, id_group=None):
+  def __init__(self, id_regex, files_by_tag, id_group=None, id_source="filename",
+    id_normalizer=None):
     self._id_col = "id"
     self._id_regex = id_regex
     self._id_pattern = re.compile(id_regex)
     self._id_group = id_group
+    if id_source not in {"filename", "path"}:
+      raise ValueError("`id_source` must be 'filename' or 'path'")
+    if id_normalizer is not None and not callable(id_normalizer):
+      raise TypeError("`id_normalizer` must be callable")
+    self._id_source = id_source
+    self._id_normalizer = id_normalizer
     self._copy_root_path = None
     self._df = self._create_dataframe(files_by_tag)
     self._readers = {}
@@ -28,16 +35,24 @@ class IDManifest:
     return f"IDManifest(rows={self.shape()[0]}, columns={list(self.columns())!r})"
 
   def _extract_id(self, file):
-    match = self._id_pattern.search(os.path.basename(file))
+    source = file if self._id_source == "path" else os.path.basename(file)
+    match = self._id_pattern.search(source)
     if match is None:
       return None
     if self._id_group is not None:
-      return match.group(self._id_group)
-    if "id" in self._id_pattern.groupindex:
-      return match.group("id")
-    if self._id_pattern.groups == 1:
-      return match.group(1)
-    return match.group(0)
+      file_id = match.group(self._id_group)
+    elif "id" in self._id_pattern.groupindex:
+      file_id = match.group("id")
+    elif self._id_pattern.groups == 1:
+      file_id = match.group(1)
+    else:
+      file_id = match.group(0)
+    return self._normalize_id(file_id)
+
+  def _normalize_id(self, file_id):
+    if file_id is None or self._id_normalizer is None:
+      return file_id
+    return self._id_normalizer(file_id)
 
   def _create_id_dict(self, files_by_tag):
     id_dict = OrderedDict()
@@ -143,6 +158,78 @@ class IDManifest:
       "miss_perc": round(missing / row_count, 2) if row_count else 0
     })
 
+  def _tracker_read_result(self, column, file_id, present):
+    if not present:
+      return "missing", None
+    if self._log is None:
+      return "not_read", None
+
+    value = self._log.loc[self._log[self._id_col] == file_id, column]
+    if value.empty or value.isna().all() or value.iloc[0] == "":
+      return "not_read", None
+    if value.iloc[0] == "Read":
+      return "read", None
+    if value.iloc[0] == "MISSING":
+      return "missing", None
+    return "error", value.iloc[0]
+
+  def tracker(self):
+    tags = [column for column in list(self.columns()) if column != self._id_col]
+    rows = []
+
+    for _, manifest_row in self._df.iterrows():
+      file_id = manifest_row[self._id_col]
+      row = {self._id_col: file_id}
+      present_count = 0
+      missing_count = 0
+      error_count = 0
+      pending_count = 0
+
+      for tag in tags:
+        file = manifest_row[tag]
+        present = not isna(file)
+        status, error = self._tracker_read_result(tag, file_id, present)
+        data = self._data.get(tag, {}).get(file_id)
+
+        if present:
+          present_count += 1
+        else:
+          missing_count += 1
+        if status == "error":
+          error_count += 1
+        if status == "not_read":
+          pending_count += 1
+
+        row[f"{tag}_path"] = file
+        row[f"{tag}_present"] = present
+        row[f"{tag}_reader_registered"] = tag in self._readers
+        row[f"{tag}_validation_registered"] = tag in self._validations
+        row[f"{tag}_read_status"] = status
+        row[f"{tag}_read_error"] = error
+        row[f"{tag}_nrows"] = getattr(data, "shape", (None, None))[0] if data is not None else None
+        row[f"{tag}_ncols"] = getattr(data, "shape", (None, None))[1] if data is not None else None
+
+      if error_count > 0:
+        overall_status = "error"
+      elif missing_count > 0:
+        overall_status = "incomplete"
+      elif pending_count > 0:
+        overall_status = "pending"
+      else:
+        overall_status = "complete"
+
+      row["overall_present_count"] = present_count
+      row["overall_missing_count"] = missing_count
+      row["overall_error_count"] = error_count
+      row["overall_pending_count"] = pending_count
+      row["overall_status"] = overall_status
+      rows.append(row)
+
+    return DataFrame(rows)
+
+  def save_tracker(self, path, **kwargs):
+    self.tracker().to_csv(path, **kwargs)
+
   def add_reader(self, column, func, **kwargs):
     if column not in list(self.columns()):
       raise KeyError(f"{column} not found in manifest")
@@ -220,7 +307,7 @@ class IDManifest:
   def read_all(self, columns=None, ids=None, ignore_missing=True, validate=True,
     log=True, keep_data=True, stop_on_error=True):
     all_columns = [col for col in list(self.columns()) if col != self._id_col]
-    columns = all_columns if columns is None else list(columns)
+    columns = all_columns if columns is None else [columns] if isinstance(columns, str) else list(columns)
     ids = list(self.ids()) if ids is None else list(ids)
 
     missing_readers = set(columns).difference(set(self._readers.keys()))
@@ -277,7 +364,10 @@ class IDManifest:
     return self._data.copy()
 
   def copy_files(self, root_path, dataframe=None, id_col="id",
-    copy_cols=None, mk_dirs=False, overwrite=False, tag_dict=None):
+    copy_cols=None, mk_dirs=False, overwrite=False, copy_new_only=False, tag_dict=None):
+    if overwrite and copy_new_only:
+      raise ValueError("`overwrite` and `copy_new_only` cannot both be True")
+
     self._copy_root_path = os.fspath(root_path)
     dataframe = self._df if dataframe is None else dataframe
     if copy_cols is None:
@@ -291,10 +381,16 @@ class IDManifest:
           out_dir.mkdir(parents=True)
         else:
           raise FileNotFoundError("The directory does not exist and `mk_dirs` was set to False")
-      if any(out_dir.iterdir()) and not overwrite:
-        raise FileExistsError("The directory is not empty. Set `overwrite=True` to overwrite current files")
+      if any(out_dir.iterdir()) and not overwrite and not copy_new_only:
+        raise FileExistsError(
+          "The directory is not empty. Set `overwrite=True` to overwrite files or "
+          "`copy_new_only=True` to skip existing files"
+        )
       for file in dataframe.loc[dataframe[column].notna(), column]:
-        shutil.copy2(file, out_dir / os.path.basename(file))
+        destination = out_dir / os.path.basename(file)
+        if copy_new_only and destination.exists():
+          continue
+        shutil.copy2(file, destination)
 
   def replace_paths(self, paths=None, use_copy_root_path=False, tag_dict=None):
     if paths is not None and use_copy_root_path:

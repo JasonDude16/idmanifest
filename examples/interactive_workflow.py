@@ -2,9 +2,9 @@ from pathlib import Path
 import sys
 import tempfile
 import pandas as pd
-from idmanifest import IDManifest, PathInventory
 
 sys.path.insert(0, str(Path.cwd() / "src"))
+from idmanifest import IDManifest, PathInventory
 
 def section(title):
   print(f"\n=== {title} ===")
@@ -184,7 +184,67 @@ named_group_inventory.to_manifest().ids().to_list()
 explicit_group_inventory.to_manifest().ids().to_list()
 
 
-# 10. Create a manifest from the cleaned inventory.
+# 10. Normalize equivalent ID styles without changing paths.
+section("ID normalization")
+mixed_id_dir = data_dir / "mixed_ids"
+mixed_alpha_dir = mixed_id_dir / "alpha"
+mixed_beta_dir = mixed_id_dir / "beta"
+mixed_alpha_dir.mkdir(parents=True)
+mixed_beta_dir.mkdir(parents=True)
+
+write_csv(mixed_alpha_dir / "BASE_101_alpha.csv", [101], group="alpha")
+write_csv(mixed_beta_dir / "BASE101_beta.csv", [101], group="beta")
+
+normalize_base_id = lambda file_id: file_id.replace("_", "")
+normalized_inventory = PathInventory(
+  {
+    "alpha": str(mixed_alpha_dir / "*.csv"),
+    "beta": str(mixed_beta_dir / "*.csv")
+  },
+  id_regex=r"BASE_?[0-9]{3}",
+  id_normalizer=normalize_base_id,
+  sort=True
+)
+normalized_manifest = normalized_inventory.to_manifest()
+show("Normalized manifest IDs with original paths", normalized_manifest.dataframe())
+
+
+# 11. Demonstrate path-based ID extraction for ID-folder layouts.
+section("Path-based ID extraction")
+id_folder_root = data_dir / "by_id"
+id_folder_alpha_101 = id_folder_root / "BASE_101" / "session_1" / "exports" / "alpha"
+id_folder_alpha_102 = id_folder_root / "BASE_102" / "session_1" / "exports" / "alpha"
+id_folder_beta_101 = id_folder_root / "BASE_101" / "session_1" / "nested" / "beta"
+id_folder_beta_102 = id_folder_root / "BASE_102" / "session_2" / "nested" / "beta"
+for directory in (id_folder_alpha_101, id_folder_alpha_102, id_folder_beta_101, id_folder_beta_102):
+  directory.mkdir(parents=True)
+
+write_csv(id_folder_alpha_101 / "BASE_101_result.csv", [101, 102], group="alpha")
+write_csv(id_folder_alpha_102 / "BASE_102_result.csv", [201, 202], group="alpha")
+write_csv(id_folder_beta_101 / "BASE_101_summary.csv", [301, 302], group="beta")
+write_csv(id_folder_beta_102 / "BASE_999_summary.csv", [401, 402], group="beta")
+
+id_folder_paths = {
+  "alpha": str(id_folder_root / "*" / "session_*" / "exports" / "alpha" / "*.csv"),
+  "beta": str(id_folder_root / "*" / "session_*" / "nested" / "beta" / "*.csv")
+}
+
+path_id_inventory = PathInventory(
+  id_folder_paths,
+  id_regex=r"BASE_([0-9]{3})",
+  id_source="path",
+  sort=True
+)
+
+path_id_inventory.id_source()
+path_id_report = path_id_inventory.check(check_path_filename_ids=True)
+show("Path/filename ID check summary", path_id_report.summary())
+show("Path/filename ID check details", path_id_report.details())
+path_id_manifest = path_id_inventory.to_manifest()
+show("Manifest from ID folders", path_id_manifest.dataframe())
+
+
+# 12. Create a manifest from the cleaned inventory.
 section("Create manifest")
 manifest = clean_inventory.to_manifest()
 manifest
@@ -196,7 +256,7 @@ manifest.complete_cases()
 manifest.complete_cases(columns=["id", "alpha", "beta", "gamma"])
 
 
-# 10.5. Add expected IDs to make intentionally missing rows explicit.
+# 12.5. Add expected IDs to make intentionally missing rows explicit.
 section("Expected IDs and ranges")
 expected_ids = ["001", "002", "003", "004", "005"]
 manifest.missing_ids(expected_ids)
@@ -209,16 +269,16 @@ base_manifest.missing_id_range(1, 5, width=3)
 base_manifest.ensure_id_range(1, 5, width=3, extras="keep")
 base_manifest.dataframe()
 
-# This mirrors a BASE101-BASE260 workflow when your extracted IDs include the prefix.
-base_prefixed = PathInventory({"alpha": str(alpha_dir / "*.csv")}, r"(BASE[0-9]{3})", sort=True, duplicate_policy="extras")
+# This mirrors a BASE_101-BASE_260 workflow when your extracted IDs include the prefix.
+base_prefixed = PathInventory({"alpha": str(alpha_dir / "*.csv")}, r"(BASE_[0-9]{3})", sort=True, duplicate_policy="extras")
 base_prefixed.remove_failed_checks(base_prefixed.check(), checks=["invalid_ids", "duplicate_ids"])
 base_prefixed_manifest = base_prefixed.to_manifest()
-base_prefixed_manifest.missing_id_range(1, 5, prefix="BASE", width=3)
-base_prefixed_manifest.ensure_id_range(1, 5, prefix="BASE", width=3, extras="keep")
+base_prefixed_manifest.missing_id_range(1, 5, prefix="BASE_", width=3)
+base_prefixed_manifest.ensure_id_range(1, 5, prefix="BASE_", width=3, extras="keep")
 base_prefixed_manifest.dataframe()
 
 
-# 11. Add readers and validations.
+# 13. Add readers and validations.
 section("Readers and validations")
 manifest.add_reader("alpha", read_csv_with_path)
 manifest.add_reader("beta", read_csv_with_path)
@@ -250,7 +310,13 @@ manifest.readers()
 manifest.validations()
 
 
-# 12. Read one file and inspect dataframe metadata.
+# 14. Inspect the master tracker before reading files.
+section("Master tracker before reading")
+tracker_before_reading = manifest.tracker()
+show("Master tracker before reading", tracker_before_reading)
+
+
+# 15. Read one file and inspect dataframe metadata.
 section("Read one file")
 alpha_001 = manifest.read("alpha", "001")
 alpha_001
@@ -260,7 +326,7 @@ alpha_001.attrs
 manifest.validate_data(alpha_001, colnames=["value", "group"], func=has_at_least_rows, kwargs={"minimum": 3})
 
 
-# 13. Read all files, logging validation failures instead of stopping.
+# 16. Read all files, logging validation failures instead of stopping.
 section("Read all files with logging")
 manifest.read_all(stop_on_error=False)
 read_log = manifest.log()
@@ -274,14 +340,23 @@ loaded_gamma_001
 loaded_gamma_003
 
 
-# 14. Read a subset of columns and IDs.
+# 17. Build and save a master tracker after reading files.
+section("Master tracker after reading")
+tracker_after_reading = manifest.tracker()
+tracker_path = root / "master_tracker.csv"
+manifest.save_tracker(tracker_path, index=False)
+show("Master tracker after reading", tracker_after_reading)
+tracker_path
+
+
+# 18. Read a subset of columns and IDs.
 section("Read a subset")
-manifest.read_all(columns=["beta"], ids=["001", "003"], stop_on_error=False)
+manifest.read_all(columns="beta", ids=["001", "003"], stop_on_error=False)
 manifest.log()
 manifest.loaded_data("beta")
 
 
-# 15. Demonstrate error handling with try/except.
+# 19. Demonstrate error handling with try/except.
 section("Expected errors")
 try:
   manifest.read("alpha", "999")
@@ -303,7 +378,7 @@ missing_column_error
 missing_file_error
 
 
-# 16. Save and reload manifest CSV and log CSV.
+# 20. Save and reload manifest CSV and log CSV.
 section("Save and load CSV outputs")
 outputs_dir = root / "outputs"
 outputs_dir.mkdir()
@@ -320,7 +395,7 @@ reloaded_manifest_df
 reloaded_log_df
 
 
-# 17. Copy source files into a clean output tree and rewrite manifest paths.
+# 21. Copy source files into a clean output tree and rewrite manifest paths.
 section("Copy files and replace paths")
 copy_root = root / "copied_files"
 manifest.copy_files(copy_root, mk_dirs=True)
@@ -329,11 +404,29 @@ sorted(path.name for path in (copy_root / "alpha").glob("*.csv"))
 sorted(path.name for path in (copy_root / "beta").glob("*.csv"))
 sorted(path.name for path in (copy_root / "gamma").glob("*.csv"))
 
+# Incremental copying lets you add new files without touching files that are already there.
+incremental_copy_root = root / "incremental_copy"
+incremental_alpha = incremental_copy_root / "alpha"
+incremental_alpha.mkdir(parents=True)
+(incremental_alpha / "BASE_001_alpha.csv").write_text("already copied")
+manifest.copy_files(incremental_copy_root, mk_dirs=True, copy_new_only=True)
+(incremental_alpha / "BASE_001_alpha.csv").read_text()
+sorted(path.name for path in (incremental_copy_root / "alpha").glob("*.csv"))
+sorted(path.name for path in (incremental_copy_root / "beta").glob("*.csv"))
+
+# Overwrite remains explicit when you do want destination files replaced.
+overwrite_copy_root = root / "overwrite_copy"
+overwrite_alpha = overwrite_copy_root / "alpha"
+overwrite_alpha.mkdir(parents=True)
+(overwrite_alpha / "BASE_001_alpha.csv").write_text("old contents")
+manifest.copy_files(overwrite_copy_root, mk_dirs=True, overwrite=True)
+(overwrite_alpha / "BASE_001_alpha.csv").read_text()
+
 copied_manifest = manifest.replace_paths(use_copy_root_path=True)
 copied_manifest
 
 
-# 18. Pickle is available for local trusted workflows only.
+# 22. Pickle is available for local trusted workflows only.
 section("Pickle local object state")
 pickle_path = outputs_dir / "manifest.pkl"
 manifest.save_pickle(pickle_path)
@@ -342,7 +435,7 @@ loaded_manifest
 loaded_manifest.dataframe()
 
 
-# 19. Refresh example after adding a new file.
+# 23. Refresh example after adding a new file.
 section("Refresh inventory")
 refresh_inventory = PathInventory({"alpha": str(alpha_dir / "*.csv")}, r"BASE_([0-9]{3})", sort=True)
 len(refresh_inventory.all_files()["alpha"])
@@ -352,7 +445,7 @@ len(refresh_inventory.all_files()["alpha"])
 refresh_inventory.all_files()
 
 
-# 20. Cleanup when finished.
+# 24. Cleanup when finished.
 section("Cleanup")
 root
 tmp.cleanup()

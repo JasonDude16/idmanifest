@@ -21,6 +21,8 @@ class PathInventory:
     id_regex,
     sort=False,
     id_group=None,
+    id_source="filename",
+    id_normalizer=None,
     duplicate_policy="all",
     allow_empty=False
   ):
@@ -32,6 +34,10 @@ class PathInventory:
       raise TypeError("`sort` must be True or False")
     if not isinstance(allow_empty, bool):
       raise TypeError("`allow_empty` must be True or False")
+    if id_source not in {"filename", "path"}:
+      raise ValueError("`id_source` must be 'filename' or 'path'")
+    if id_normalizer is not None and not callable(id_normalizer):
+      raise TypeError("`id_normalizer` must be callable")
     if duplicate_policy not in self.VALID_DUPLICATE_POLICIES:
       raise ValueError("`duplicate_policy` must be 'all' or 'extras'")
 
@@ -39,6 +45,8 @@ class PathInventory:
     self._id_regex = id_regex
     self._id_pattern = re.compile(id_regex)
     self._id_group = id_group
+    self._id_source = id_source
+    self._id_normalizer = id_normalizer
     self._sort = sort
     self._allow_empty = allow_empty
     self._duplicate_policy = duplicate_policy
@@ -71,21 +79,38 @@ class PathInventory:
   def _new_check_results(self):
     return OrderedDict(
       (method, _empty_file_dict(self._all_files.keys()))
-      for method in ("invalid_ids", "duplicate_ids", "duplicate_files")
+      for method in ("invalid_ids", "duplicate_ids", "duplicate_files", "path_filename_id_mismatches")
     )
 
-  def _extract_id(self, file):
-    match = self._id_pattern.search(os.path.basename(file))
+  def _extract_id_from_source(self, source):
+    match = self._id_pattern.search(source)
     if match is None:
       return None
 
     if self._id_group is not None:
-      return match.group(self._id_group)
-    if "id" in self._id_pattern.groupindex:
-      return match.group("id")
-    if self._id_pattern.groups == 1:
-      return match.group(1)
-    return match.group(0)
+      file_id = match.group(self._id_group)
+    elif "id" in self._id_pattern.groupindex:
+      file_id = match.group("id")
+    elif self._id_pattern.groups == 1:
+      file_id = match.group(1)
+    else:
+      file_id = match.group(0)
+    return self._normalize_id(file_id)
+
+  def _normalize_id(self, file_id):
+    if file_id is None or self._id_normalizer is None:
+      return file_id
+    return self._id_normalizer(file_id)
+
+  def _extract_id(self, file):
+    source = file if self._id_source == "path" else os.path.basename(file)
+    return self._extract_id_from_source(source)
+
+  def _extract_filename_id(self, file):
+    return self._extract_id_from_source(os.path.basename(file))
+
+  def _extract_directory_id(self, file):
+    return self._extract_id_from_source(os.path.dirname(file))
 
   def _normalize_tags(self, tags):
     if tags is None:
@@ -134,6 +159,12 @@ class PathInventory:
 
   def id_regex(self):
     return self._id_regex
+
+  def id_source(self):
+    return self._id_source
+
+  def id_normalizer(self):
+    return self._id_normalizer
 
   def paths(self):
     return OrderedDict(self._path_inputs)
@@ -207,15 +238,45 @@ class PathInventory:
     self._check_results["duplicate_files"] = _copy_file_dict(results)
     return results
 
-  def check(self, duplicate_policy=None):
+  def check_path_filename_id_mismatches(self, tags=None):
+    if self._id_source != "path":
+      raise ValueError("Path/filename ID mismatch checks require `id_source='path'`")
+
+    results = _empty_file_dict(self._all_files.keys())
+    for tag in self._normalize_tags(tags):
+      for file in self._kept_files[tag]:
+        path_id = self._extract_directory_id(file)
+        filename_id = self._extract_filename_id(file)
+        if path_id is not None and path_id != filename_id:
+          results[tag].append({
+            "id": path_id,
+            "filename_id": filename_id,
+            "file": file
+          })
+
+    self._check_results["path_filename_id_mismatches"] = _copy_file_dict(results)
+    return results
+
+  def check(self, duplicate_policy=None, check_path_filename_ids=False):
     invalid_ids = self.check_invalid_ids()
     duplicate_ids = self.check_duplicate_ids(policy=duplicate_policy, force=True)
     duplicate_files = self.check_duplicate_files()
-    self._last_report = CheckReport(invalid_ids, duplicate_ids, duplicate_files)
+    path_filename_id_mismatches = None
+    if check_path_filename_ids:
+      path_filename_id_mismatches = self.check_path_filename_id_mismatches()
+    self._last_report = CheckReport(
+      invalid_ids,
+      duplicate_ids,
+      duplicate_files,
+      path_filename_id_mismatches
+    )
     return self._last_report
 
-  def run_all_checks(self, duplicate_policy=None):
-    report = self.check(duplicate_policy=duplicate_policy)
+  def run_all_checks(self, duplicate_policy=None, check_path_filename_ids=False):
+    report = self.check(
+      duplicate_policy=duplicate_policy,
+      check_path_filename_ids=check_path_filename_ids
+    )
     if not report.is_valid:
       counts = ", ".join(f"{key}={value}" for key, value in report.counts().items())
       raise ValueError(f"Inventory checks failed: {counts}")
@@ -259,7 +320,7 @@ class PathInventory:
 
   def remove_failed_checks(self, report=None, checks=None):
     report = report or self._last_report or self.check()
-    check_names = checks or ("invalid_ids", "duplicate_ids", "duplicate_files")
+    check_names = checks or tuple(report.counts().keys())
     files = _empty_file_dict(self._all_files.keys())
     for check_name in check_names:
       for tag, check_files in report.files_for(check_name).items():
@@ -268,20 +329,33 @@ class PathInventory:
 
   def keep_failed_checks(self, report=None, checks=None):
     report = report or self._last_report or self.check()
-    check_names = checks or ("invalid_ids", "duplicate_ids", "duplicate_files")
+    check_names = checks or tuple(report.counts().keys())
     files = _empty_file_dict(self._all_files.keys())
     for check_name in check_names:
       for tag, check_files in report.files_for(check_name).items():
         files[tag].extend(file for file in check_files if file not in files[tag])
     return self.keep_files(files)
 
-  def to_manifest(self, validate=True, duplicate_policy=None):
+  def to_manifest(self, validate=True, duplicate_policy=None, check_path_filename_ids=False):
     if validate:
-      self.run_all_checks(duplicate_policy=duplicate_policy)
-    return IDManifest(self._id_regex, self._kept_files, id_group=self._id_group)
+      self.run_all_checks(
+        duplicate_policy=duplicate_policy,
+        check_path_filename_ids=check_path_filename_ids
+      )
+    return IDManifest(
+      self._id_regex,
+      self._kept_files,
+      id_group=self._id_group,
+      id_source=self._id_source,
+      id_normalizer=self._id_normalizer
+    )
 
-  def create_manifest(self, validate=True, duplicate_policy=None):
-    return self.to_manifest(validate=validate, duplicate_policy=duplicate_policy)
+  def create_manifest(self, validate=True, duplicate_policy=None, check_path_filename_ids=False):
+    return self.to_manifest(
+      validate=validate,
+      duplicate_policy=duplicate_policy,
+      check_path_filename_ids=check_path_filename_ids
+    )
 
   def reset(self):
     self._kept_files = _copy_file_dict(self._all_files)
